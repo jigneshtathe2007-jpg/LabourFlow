@@ -1,0 +1,186 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Daily Hajiri</title>
+<script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="./styles.css"></head>
+<body class="bg-[#0f172a] text-slate-300"><div id="app"></div>
+<script type="module">
+import { requireAuth } from "./js/auth.js";
+import { list, insertRow, nextId, audit, deleteRow, toast, money, today } from "./js/utils.js";
+import { dataTable, esc } from "./js/ui.js";
+const num = value => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const r2 = n =>
+  Math.round((num(n) + Number.EPSILON) * 100) / 100;
+
+const dateKey = value => {
+  if (!value) return "";
+
+  const s = String(value);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return s;
+  }
+
+  const d = new Date(s);
+
+  if (!Number.isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  return s.slice(0, 10);
+};
+const latest = rows =>
+  rows.sort((a, b) =>
+    dateKey(b.effectiveFrom).localeCompare(dateKey(a.effectiveFrom))
+  )[0];
+const sel = "mt-1 w-full bg-slate-900 border border-slate-600 rounded-lg p-2";
+
+requireAuth("hajiri", ({ user, role, content }) => {
+  const keep = { site: "", labour: "", date: today(), code: "", month: today().slice(0, 7), fsite: "" };
+  const load = async () => {
+    const [labs, sites, codes, lr, tr, logs, cards, sups] = await Promise.all(["labours", "sites", "hajiriCodes", "labourRateMaster", "tradeRateMaster", "dailyHajiriLogs", "attendanceCards", "supervisors"].map(list));
+    const users = role === "ADMIN" ? await list("users") : [];
+    const mySup = role === "SUPERVISOR" ? sups.find(s => Number(s.userId) === Number(user.id)) : null;
+    if (role === "SUPERVISOR" && !mySup) return (content.innerHTML = `<p class="text-red-400">Your login is not linked to a supervisor record. Ask the admin.</p>`);
+    if (!codes.length) return (content.innerHTML = `<p class="text-red-400">No Hajiri codes found. Load master data from the dashboard first.</p>`);
+    const mySites = role === "SUPERVISOR" ? sites.filter(s => s.siteId === mySup.siteId) : sites;
+
+    // Rate rule: worker-specific rate valid on that date, else the trade default (same as sp_InsertDailyHajiri)
+    const rateFor = (l, date) => {
+  const ok = r =>
+    dateKey(r.effectiveFrom) <= date &&
+    (!r.effectiveTo || dateKey(r.effectiveTo) >= date);
+
+  const w = latest(lr.filter(
+    r => String(r.labourId) === String(l.labourId) && ok(r)
+  ));
+
+  if (w) return num(w.effectiveDailyRate);
+
+  const d = latest(tr.filter(
+    r => String(r.tradeId) === String(l.tradeId) && ok(r)
+  ));
+
+  return d ? num(d.baseDailyRate) : null;
+};
+    const tradeName = {}; (await list("trades")).forEach(t => (tradeName[t.tradeId] = t.tradeName));
+
+    content.innerHTML = `
+    <div class="bg-[#1e293b] border border-slate-700 rounded-xl shadow p-4 mb-4"><h1 class="text-lg font-semibold text-white mb-3">Add Daily Hajiri</h1>
+      <div class="grid md:grid-cols-2 gap-3">
+        <label class="text-sm">Site<select id="fs" class="${sel}">${mySites.map(s => `<option value="${s.siteId}">${esc(s.siteName)}</option>`)}</select></label>
+        <label class="text-sm">Labour<select id="fl" class="${sel}"></select></label>
+        <label class="text-sm">Date<input id="fd" type="date" max="${today()}" class="${sel}"></label>
+        <label class="text-sm">Hajiri Code<select id="fc" class="${sel}">${codes.map(c => `<option value="${esc(c.hajiriCode)}">${esc(c.hajiriCode)} - ${esc(c.description || "")}</option>`)}</select></label>
+        ${role === "ADMIN" ? `<label class="text-sm md:col-span-2">Entered on behalf of supervisor<select id="fsup" class="${sel}">${sups.map(s => `<option value="${s.supervisorId}">${esc(users.find(u => u._id === s.userId)?.fullName || "Supervisor " + s.supervisorId)}</option>`)}</select></label>` : ""}
+      </div>
+      <div id="pv" class="my-4 p-4 bg-slate-900 rounded-lg text-sm"></div>
+      <button id="sv" class="bg-green-600 hover:bg-green-500 text-white px-5 py-2 rounded-lg">Save Hajiri</button></div>
+    <div class="bg-[#1e293b] border border-slate-700 rounded-xl shadow p-4"><div class="flex flex-wrap gap-2 items-center mb-2"><h2 class="text-lg font-semibold text-white mr-auto">Attendance Records</h2>
+      <input id="fm" type="month" class="bg-slate-900 border border-slate-600 rounded-lg p-2">
+      ${role === "ADMIN" ? `<select id="ff" class="bg-slate-900 border border-slate-600 rounded-lg p-2"><option value="">All sites</option>${sites.map(s => `<option value="${s.siteId}">${esc(s.siteName)}</option>`)}</select>` : ""}</div>
+      <div id="sum" class="text-sm text-slate-400 mb-2"></div><div id="t"></div></div>`;
+
+    const fillLabours = () => { fl.innerHTML = labs.filter(l => l.isActive && l.currentSiteId == fs.value).map(l => `<option value="${l.labourId}">${esc(l.fullName)} (${esc(tradeName[l.tradeId] || "")})</option>`).join("");
+      if (keep.labour) fl.value = keep.labour; preview(); };
+    // Auto calculation: units = hours / 2 ; day amount = hours x daily rate / 8
+    const calc = () => { const l = labs.find(x => x.labourId == fl.value), c = codes.find(x => x.hajiriCode === fc.value); if (!l || !c || !fd.value) return null;
+      const rate = rateFor(l, fd.value); return { l, c, rate, amount: rate == null ? null : r2(c.hoursWorked * rate / 8) }; };
+    const preview = () => { const x = calc();
+      pv.innerHTML = !fl.value ? "No active labour at this site." : !x ? "Select a date." :
+        `<div class="grid grid-cols-2 md:grid-cols-5 gap-3"><div><div class="text-slate-500 text-xs">Labour / Trade</div>${esc(x.l.fullName)}<br><span class="text-slate-400">${esc(tradeName[x.l.tradeId] || "")}</span></div>
+        <div><div class="text-slate-500 text-xs">Work Duration</div>${x.c.hoursWorked} hrs</div><div><div class="text-slate-500 text-xs">Hajiri Units</div>${x.c.hajiriUnits}</div>
+        <div><div class="text-slate-500 text-xs">Applied Rate</div>${x.rate == null ? '<span class="text-red-400">No rate</span>' : money(x.rate) + "/day"}</div>
+        <div><div class="text-slate-500 text-xs">Day Amount</div><b class="text-white text-lg">${x.amount == null ? "-" : money(x.amount)}</b></div></div>`; };
+    fs.onchange = () => { keep.labour = ""; fillLabours(); }; [fl, fd, fc].forEach(e => (e.onchange = () => { keep.labour = fl.value; preview(); }));
+    fs.value = keep.site || fs.value; fd.value = keep.date; if (keep.code) fc.value = keep.code; fillLabours();
+
+    sv.onclick = async () => {
+      sv.disabled = true; sv.textContent = "Saving...";
+      try {
+        const x = calc(); if (!x) throw new Error("Select labour, date and code.");
+        if (fd.value > today()) throw new Error("Future dates are not allowed.");
+        if (x.rate == null) throw new Error("No rate defined for this labour on this date. Set a trade or worker rate first.");
+        const supervisorId = role === "SUPERVISOR" ? mySup.supervisorId : +document.getElementById("fsup")?.value; if (!supervisorId) throw new Error("Add a supervisor first.");
+        const month = fd.value.slice(0, 7), dup = "Attendance already exists for this worker on this date.";
+        let card = (await list("attendanceCards")).find(c => c.labourId === x.l.labourId && c.monthYear === month);   // UNIQUE (LabourID, MonthYear)
+        if (
+  card &&
+  logs.some(g =>
+    String(g.cardId) === String(card.cardId) &&
+    dateKey(g.logDate) === fd.value
+  )
+) {
+  throw new Error(dup);
+}
+        const cardId = card ? card.cardId : await insertRow("attendanceCards", "cardId", { labourId: x.l.labourId, siteId: +fs.value, supervisorId,
+          cardNumber: "HC-" + month + "-" + String(x.l.labourId).padStart(3, "0"), monthYear: month, issuedDate: today() });
+        const docId = cardId + "_" + fd.value;      // document id = CardID + date => UNIQUE (CardID, LogDate)
+        const row = { cardId, siteId: +fs.value, supervisorId, logDate: fd.value, hajiriCode: fc.value, appliedDailyRate: x.rate, entryTimestamp: new Date().toISOString() };
+        await insertRow("dailyHajiriLogs", "logId", row);
+        await audit("dailyHajiriLogs", docId, "INSERT", null, row);
+        Object.assign(keep, { site: fs.value, labour: fl.value, date: fd.value, code: fc.value });
+        toast("Attendance saved successfully."); load();
+      } catch (e) { toast(e.message, false); sv.disabled = false; sv.textContent = "Save Hajiri"; }
+    };
+
+    const table = () => {
+      const rows = logs
+  .filter(g =>
+    dateKey(g.logDate).startsWith(keep.month) &&
+    (
+      role === "SUPERVISOR"
+        ? String(g.siteId) === String(mySup.siteId)
+        : (!keep.fsite || String(g.siteId) === String(keep.fsite))
+    )
+  )
+  .map(g => {
+    const card = cards.find(
+      c => String(c.cardId) === String(g.cardId)
+    );
+
+    const lab = labs.find(
+      l => String(l.labourId) === String(card?.labourId)
+    );
+
+    const c = codes.find(
+      k => String(k.hajiriCode) === String(g.hajiriCode)
+    ) || {};
+
+    const hours = num(c.hoursWorked);
+    const units = num(c.hajiriUnits);
+    const rate = num(g.appliedDailyRate);
+
+    return {
+      ...g,
+      displayDate: dateKey(g.logDate),
+      name: lab?.fullName || "-",
+      siteName: sites.find(
+        s => String(s.siteId) === String(g.siteId)
+      )?.siteName || "-",
+      hours,
+      units,
+      amount: r2(hours * rate / 8)
+    };
+  });
+          
+      sum.textContent =
+  `${rows.length} entries | ` +
+  `${r2(rows.reduce((a, r) => a + num(r.units), 0)).toFixed(2)} Hajiri units | ` +
+  `${money(rows.reduce((a, r) => a + num(r.amount), 0))} wages`;
+      dataTable(document.getElementById("t"), { file: "attendance.csv", rows,
+        cols: [["displayDate", "Date"], ["name", "Labour"], ["siteName", "Site"], ["hajiriCode", "Code"], ["hours", "Hours"], ["units", "Units"], ["appliedDailyRate", "Rate", v => money(v)], ["amount", "Day Amount", v => money(v)], ["supervisorId", "Sup. ID"]],
+        actions: role === "ADMIN" ? [["Delete", async g => { if (!confirm("Delete this attendance entry?")) return;
+          await deleteRow("dailyHajiriLogs", g._id, { cardId: g.cardId, logDate: g.logDate, hajiriCode: g.hajiriCode }); toast("Entry deleted."); load(); }]] : [] });
+    };
+    fm.value = keep.month; fm.onchange = e => { keep.month = e.target.value || today().slice(0, 7); table(); };
+    if (role === "ADMIN") { ff.value = keep.fsite; ff.onchange = e => { keep.fsite = e.target.value; table(); }; }
+    table();
+  };
+  load();
+});
+</script></body></html>

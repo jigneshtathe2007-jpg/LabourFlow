@@ -1,0 +1,755 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Payroll</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media print {
+      aside, .noprint { display: none !important; }
+      body { background: #fff !important; color: #000 !important; }
+    }
+  </style>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="bg-[#0f172a] text-slate-300">
+  <div id="app"></div>
+
+  <script type="module">
+    import { requireAuth } from "./js/auth.js";
+    import {
+      list, audit, insertRow, updateRow, toast, money, today
+    } from "./js/utils.js";
+    import { dataTable, form, showModal, esc } from "./js/ui.js";
+
+    // MySQL decimals may arrive as strings. Always convert before arithmetic.
+    const num = value => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const r2 = value =>
+      Math.round((num(value) + Number.EPSILON) * 100) / 100;
+
+    const sameId = (a, b) =>
+      a !== null && a !== undefined &&
+      b !== null && b !== undefined &&
+      String(a) === String(b);
+
+    // Keep plain SQL dates as-is; convert timestamp dates to the local date.
+    const dateKey = value => {
+      if (value === null || value === undefined || value === "") return "";
+
+      if (value instanceof Date) {
+        if (Number.isNaN(value.getTime())) return "";
+        const y = value.getFullYear();
+        const m = String(value.getMonth() + 1).padStart(2, "0");
+        const d = String(value.getDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      }
+
+      const s = String(value);
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+      // MySQL DATETIME strings without a timezone retain their date prefix.
+      if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(s)) {
+        return s.slice(0, 10);
+      }
+
+      const d = new Date(s);
+
+      if (!Number.isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+      }
+
+      return s.slice(0, 10);
+    };
+
+    const monthKey = value => {
+      const s = String(value ?? "");
+      if (/^\d{4}-\d{2}$/.test(s)) return s;
+      return dateKey(value).slice(0, 7);
+    };
+
+    const monthEnd = month => {
+      const [year, monthNumber] = month.split("-").map(Number);
+      return `${year}-${String(monthNumber).padStart(2, "0")}-${String(
+        new Date(year, monthNumber, 0).getDate()
+      ).padStart(2, "0")}`;
+    };
+
+    const badge = value => {
+      const colors = {
+        OPEN: "bg-amber-500",
+        PENDING: "bg-amber-500",
+        DRAFT: "bg-amber-500",
+        APPROVED: "bg-indigo-600",
+        DEDUCTED: "bg-green-600",
+        PAID: "bg-green-600",
+        REJECTED: "bg-red-600"
+      };
+
+      const status = String(value ?? "");
+      return `<span class="px-2 py-0.5 rounded text-xs text-white ${
+        colors[status] || "bg-slate-600"
+      }">${esc(status)}</span>`;
+    };
+
+    const sel = "bg-slate-900 border border-slate-600 rounded-lg p-2";
+
+    requireAuth("payroll", ({ role, content }) => {
+      const S = {
+        month: today().slice(0, 7),
+        site: "",
+        trade: ""
+      };
+
+      const load = async () => {
+        try {
+          const [
+            labs, sites, trades, codes, logs, cards, extra, adv, pay
+          ] = await Promise.all([
+            "labours",
+            "sites",
+            "trades",
+            "hajiriCodes",
+            "dailyHajiriLogs",
+            "attendanceCards",
+            "extraWorkLogs",
+            "advanceLedger",
+            "monthlyPayrollSummary"
+          ].map(list));
+
+          const tn = id =>
+            trades.find(t => sameId(t.tradeId, id))?.tradeName || "-";
+
+          content.innerHTML = `
+            <div class="bg-[#1e293b] border border-slate-700 rounded-xl shadow p-4">
+              <h1 class="text-lg font-semibold text-white mb-3">Monthly Payroll</h1>
+
+              <div class="noprint flex flex-wrap gap-2 mb-3">
+                <input id="pm" type="month" class="${sel}">
+                <select id="ps" class="${sel}">
+                  <option value="">All sites</option>
+                  ${sites.map(s =>
+                    `<option value="${esc(s.siteId)}">${esc(s.siteName)}</option>`
+                  ).join("")}
+                </select>
+
+                <select id="pt" class="${sel}">
+                  <option value="">All trades</option>
+                  ${trades.map(t =>
+                    `<option value="${esc(t.tradeId)}">${esc(t.tradeName)}</option>`
+                  ).join("")}
+                </select>
+
+                <button id="gen"
+                  class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg">
+                  Generate Payroll
+                </button>
+
+                <button id="pr"
+                  class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg">
+                  Print
+                </button>
+              </div>
+
+              <div id="sum" class="text-sm text-slate-400 mb-2"></div>
+              <div id="t"></div>
+            </div>
+          `;
+
+          const pm = document.getElementById("pm");
+          const ps = document.getElementById("ps");
+          const pt = document.getElementById("pt");
+          const gen = document.getElementById("gen");
+          const pr = document.getElementById("pr");
+          const sum = document.getElementById("sum");
+
+          // Calculate the month's figures from saved attendance.
+          const compute = labour => {
+            const workerCards = cards.filter(c =>
+              sameId(c.labourId, labour.labourId)
+            );
+
+            const cardIds = workerCards.map(c => String(c.cardId));
+
+            const workerLogs = logs.filter(g =>
+              cardIds.includes(String(g.cardId)) &&
+              monthKey(g.logDate) === S.month
+            );
+
+            if (!workerLogs.length) return null;
+
+            let hours = 0;
+            let wages = 0;
+
+            for (const log of workerLogs) {
+              const code = codes.find(c =>
+                String(c.hajiriCode) === String(log.hajiriCode)
+              );
+
+              const workedHours = num(code?.hoursWorked);
+              const dailyRate = num(log.appliedDailyRate);
+
+              hours += workedHours;
+              wages += workedHours * dailyRate / 8;
+            }
+
+            const extraAmount = extra
+              .filter(e =>
+                sameId(e.labourId, labour.labourId) &&
+                String(e.status).toUpperCase() === "APPROVED" &&
+                monthKey(e.workDate) === S.month
+              )
+              .reduce((total, e) =>
+                total + num(e.approvedAmount), 0
+              );
+
+            const endDate = monthEnd(S.month);
+
+            const advanceAmount = adv
+              .filter(a => {
+                if (!sameId(a.labourId, labour.labourId)) return false;
+
+                const status = String(a.settlementStatus || "").toUpperCase();
+
+                if (status === "DEDUCTED") {
+                  return monthKey(a.deductedInMonth) === S.month;
+                }
+
+                return status === "OPEN" &&
+                  dateKey(a.dateGiven) <= endDate;
+              })
+              .reduce((total, a) =>
+                total + num(a.advanceAmount), 0
+              );
+
+            return {
+              totalHours: r2(hours),
+              totalUnits: r2(hours / 2),
+              dayWages: r2(wages),
+              extraWorkAmount: r2(extraAmount),
+              advanceDeducted: r2(advanceAmount)
+            };
+          };
+
+          const net = row =>
+            r2(
+              num(row.dayWages) +
+              num(row.extraWorkAmount) -
+              num(row.advanceDeducted) -
+              num(row.otherDeductions) +
+              num(row.allowances)
+            );
+
+          // Generate only new or existing DRAFT payroll records.
+          // Never overwrite APPROVED or PAID records here.
+          gen.onclick = async () => {
+            gen.disabled = true;
+            gen.textContent = "Generating...";
+
+            let generated = 0;
+            let locked = 0;
+            let missingAttendance = 0;
+
+            try {
+              const workers = labs.filter(l =>
+                (!S.site || sameId(l.currentSiteId, S.site)) &&
+                (!S.trade || sameId(l.tradeId, S.trade))
+              );
+
+              for (const labour of workers) {
+                const old = pay.find(p =>
+                  sameId(p.labourId, labour.labourId) &&
+                  monthKey(p.monthYear) === S.month
+                );
+
+                // Existing non-DRAFT payroll is preserved.
+                if (old && String(old.status).toUpperCase() !== "DRAFT") {
+                  locked++;
+                  continue;
+                }
+
+                const computed = compute(labour);
+
+                if (!computed) {
+                  missingAttendance++;
+                  continue;
+                }
+
+                const row = {
+                  labourId: labour.labourId,
+                  monthYear: S.month,
+                  ...computed,
+                  otherDeductions: r2(old?.otherDeductions ?? 0),
+                  allowances: r2(old?.allowances ?? 0),
+                  status: "DRAFT",
+                  generatedOn: new Date().toISOString()
+                };
+
+                row.grossWages = r2(
+                  row.dayWages + row.extraWorkAmount
+                );
+
+                row.netPayable = net(row);
+
+                const recordId = old
+                  ? (old.payrollId ?? old._id)
+                  : null;
+
+                if (old) {
+                  if (recordId === null || recordId === undefined) {
+                    throw new Error(
+                      "Existing payroll ID is missing. No record was updated."
+                    );
+                  }
+
+                  await updateRow(
+                    "monthlyPayrollSummary",
+                    recordId,
+                    row,
+                    old
+                  );
+                } else {
+                  await insertRow(
+                    "monthlyPayrollSummary",
+                    "payrollId",
+                    row
+                  );
+                }
+
+                await audit(
+                  "monthlyPayrollSummary",
+                  recordId ?? `${labour.labourId}_${S.month}`,
+                  old ? "UPDATE" : "INSERT",
+                  old ? { netPayable: old.netPayable } : null,
+                  { netPayable: row.netPayable, status: "DRAFT" }
+                );
+
+                generated++;
+              }
+
+              if (generated > 0) {
+                toast(
+                  `${generated} payroll record(s) generated.` +
+                  (locked
+                    ? ` ${locked} approved/paid record(s) left unchanged.`
+                    : ""),
+                  true
+                );
+              } else if (locked > 0) {
+                toast(
+                  `${locked} existing approved/paid record(s) were left unchanged.` +
+                  (missingAttendance
+                    ? ` ${missingAttendance} other worker(s) have no attendance for ${S.month}.`
+                    : ""),
+                  true
+                );
+              } else {
+                toast(
+                  `No attendance found for ${S.month}.`,
+                  false
+                );
+              }
+            } catch (error) {
+              console.error("Generate payroll:", error);
+              toast(error.message || "Could not generate payroll.", false);
+            } finally {
+              gen.disabled = false;
+              gen.textContent = "Generate Payroll";
+              await load();
+            }
+          };
+
+          pr.onclick = () => window.print();
+
+          // Show full payroll details for one worker.
+          const details = payroll => {
+            const labour = labs.find(l =>
+              sameId(l.labourId, payroll.labourId)
+            ) || {};
+
+            const workerCardIds = cards
+              .filter(c => sameId(c.labourId, payroll.labourId))
+              .map(c => String(c.cardId));
+
+            const workerLogs = logs
+              .filter(g =>
+                workerCardIds.includes(String(g.cardId)) &&
+                monthKey(g.logDate) === monthKey(payroll.monthYear)
+              )
+              .sort((a, b) =>
+                dateKey(a.logDate).localeCompare(dateKey(b.logDate))
+              );
+
+            const workerExtra = extra.filter(e =>
+              sameId(e.labourId, payroll.labourId) &&
+              monthKey(e.workDate) === monthKey(payroll.monthYear)
+            );
+
+            const workerAdvances = adv.filter(a =>
+              sameId(a.labourId, payroll.labourId)
+            );
+
+            const makeTable = (headers, rows) => `
+              <table class="w-full mb-3">
+                <tr class="text-left text-slate-400">
+                  ${headers.map(h => `<th class="py-1">${h}</th>`).join("")}
+                </tr>
+                ${rows.map(row => `
+                  <tr class="border-t border-slate-700">
+                    ${row.map(cell => `<td class="py-1">${cell ?? ""}</td>`).join("")}
+                  </tr>
+                `).join("") || `
+                  <tr><td class="py-1 text-slate-500">None</td></tr>
+                `}
+              </table>
+            `;
+
+            showModal(
+              `${labour.fullName || "Labourer"} - ${payroll.monthYear}`,
+              `
+                <div class="mb-2">
+                  Trade: ${esc(tn(labour.tradeId))} |
+                  Aadhar: ${esc(labour.aadharNo || "-")} |
+                  Bank A/C: ${esc(labour.bankAccNo || "-")} |
+                  IFSC: ${esc(labour.ifscCode || "-")}
+                </div>
+
+                <b class="text-white">Attendance</b>
+                ${makeTable(
+                  ["Date", "Code", "Units", "Rate", "Amount"],
+                  workerLogs.map(log => {
+                    const code = codes.find(c =>
+                      String(c.hajiriCode) === String(log.hajiriCode)
+                    );
+                    const hours = num(code?.hoursWorked);
+                    const rate = num(log.appliedDailyRate);
+
+                    return [
+                      esc(dateKey(log.logDate)),
+                      esc(log.hajiriCode),
+                      r2(hours / 2),
+                      money(rate),
+                      money(r2(hours * rate / 8))
+                    ];
+                  })
+                )}
+
+                <b class="text-white">Extra work</b>
+                ${makeTable(
+                  ["Date", "Description", "Hours", "Amount", "Status"],
+                  workerExtra.map(e => [
+                    esc(dateKey(e.workDate)),
+                    esc(e.jobDescription || "-"),
+                    num(e.hours),
+                    e.approvedAmount == null
+                      ? "-"
+                      : money(e.approvedAmount),
+                    badge(e.status)
+                  ])
+                )}
+
+                <b class="text-white">Advances</b>
+                ${makeTable(
+                  ["Date", "Amount", "Status"],
+                  workerAdvances.map(a => [
+                    esc(dateKey(a.dateGiven)),
+                    money(a.advanceAmount),
+                    badge(a.settlementStatus)
+                  ])
+                )}
+
+                <div class="border-t border-slate-600 pt-2 space-y-1">
+                  <div>Day wages: ${money(payroll.dayWages)}</div>
+                  <div>+ Extra work: ${money(payroll.extraWorkAmount)}</div>
+                  <div>= Gross wages: ${money(payroll.grossWages)}</div>
+                  <div>- Advances: ${money(payroll.advanceDeducted)}</div>
+                  <div>- Other deductions: ${money(payroll.otherDeductions)}</div>
+                  <div>+ Allowances: ${money(payroll.allowances)}</div>
+                  <div class="text-white font-bold text-base">
+                    = Net payable: ${money(payroll.netPayable)}
+                  </div>
+                </div>
+              `
+            );
+          };
+
+          const table = () => {
+            const rows = pay
+              .filter(p => monthKey(p.monthYear) === S.month)
+              .map(p => {
+                const labour = labs.find(l =>
+                  sameId(l.labourId, p.labourId)
+                ) || {};
+
+                return {
+                  ...p,
+                  _id: p._id ?? p.payrollId,
+                  name: labour.fullName || "-",
+                  trade: tn(labour.tradeId),
+                  site: labour.currentSiteId,
+                  tradeId: labour.tradeId,
+                  l: labour
+                };
+              })
+              .filter(row =>
+                (!S.site || sameId(row.site, S.site)) &&
+                (!S.trade || sameId(row.tradeId, S.trade))
+              );
+
+            const total = rows.reduce(
+              (value, row) => value + num(row.netPayable),
+              0
+            );
+
+            sum.textContent =
+              `${rows.length} workers | Total net payable: ${money(r2(total))}`;
+
+            dataTable(document.getElementById("t"), {
+              file: `payroll-${S.month}.csv`,
+              rows,
+              cols: [
+                ["name", "Labour"],
+                ["trade", "Trade"],
+                ["totalUnits", "Units"],
+                ["grossWages", "Gross Wages", v => money(v)],
+                ["extraWorkAmount", "Extra Work", v => money(v)],
+                ["advanceDeducted", "Advances", v => money(v)],
+                ["otherDeductions", "Other Ded.", v => money(v)],
+                ["allowances", "Allowances", v => money(v)],
+                ["netPayable", "Net Payable",
+                  v => "<b>" + money(v) + "</b>"],
+                ["status", "Status", badge]
+              ],
+              actions: [
+                ["Details", details],
+
+                ["Edit", payroll => {
+                  if (payroll.status !== "DRAFT") {
+                    return toast(
+                      "Only DRAFT payroll can be edited.",
+                      false
+                    );
+                  }
+
+                  form(
+                    "Allowances & other deductions",
+                    [
+                      [
+                        "allowances",
+                        "Allowances - shoes, lunch (₹)",
+                        "number",
+                        'min="0" step="0.01"'
+                      ],
+                      [
+                        "otherDeductions",
+                        "Other deductions (₹)",
+                        "number",
+                        'min="0" step="0.01"'
+                      ]
+                    ],
+                    payroll,
+                    async data => {
+                      const patch = {
+                        allowances: r2(data.allowances),
+                        otherDeductions: r2(data.otherDeductions)
+                      };
+
+                      if (
+                        patch.allowances < 0 ||
+                        patch.otherDeductions < 0
+                      ) {
+                        throw new Error("Values cannot be negative.");
+                      }
+
+                      patch.netPayable = net({
+                        ...payroll,
+                        ...patch
+                      });
+
+                      const id = payroll.payrollId ?? payroll._id;
+                      if (id === null || id === undefined) {
+                        throw new Error("Payroll ID is missing.");
+                      }
+
+                      await updateRow(
+                        "monthlyPayrollSummary",
+                        id,
+                        patch,
+                        {
+                          allowances: payroll.allowances,
+                          otherDeductions: payroll.otherDeductions,
+                          netPayable: payroll.netPayable
+                        }
+                      );
+
+                      toast("Payroll updated.");
+                      await load();
+                    }
+                  );
+                }],
+
+                ["Approve", async payroll => {
+                  if (payroll.status !== "DRAFT") {
+                    return toast(
+                      "Only DRAFT payroll can be approved.",
+                      false
+                    );
+                  }
+
+                  const computed = compute(payroll.l);
+
+                  const changed = !computed ||
+                    r2(computed.advanceDeducted) !==
+                      r2(payroll.advanceDeducted) ||
+                    r2(computed.dayWages) !==
+                      r2(payroll.dayWages) ||
+                    r2(computed.extraWorkAmount) !==
+                      r2(payroll.extraWorkAmount);
+
+                  if (changed) {
+                    return toast(
+                      "Attendance, advances or extra work changed since generation. Generate payroll again.",
+                      false
+                    );
+                  }
+
+                  if (!confirm(
+                    "Approve payroll for " + payroll.name +
+                    "? Open advances will be marked as deducted."
+                  )) return;
+
+                  try {
+                    const endDate = monthEnd(S.month);
+
+                    for (const advance of adv.filter(a =>
+                      sameId(a.labourId, payroll.labourId) &&
+                      String(a.settlementStatus).toUpperCase() === "OPEN" &&
+                      dateKey(a.dateGiven) <= endDate
+                    )) {
+                      await updateRow(
+                        "advanceLedger",
+                        advance.advanceId ?? advance._id,
+                        {
+                          settlementStatus: "DEDUCTED",
+                          deductedInMonth: S.month
+                        },
+                        {
+                          settlementStatus: "OPEN",
+                          deductedInMonth: null
+                        }
+                      );
+                    }
+
+                    const id = payroll.payrollId ?? payroll._id;
+                    if (id === null || id === undefined) {
+                      throw new Error("Payroll ID is missing.");
+                    }
+
+                    await updateRow(
+                      "monthlyPayrollSummary",
+                      id,
+                      { status: "APPROVED" },
+                      { status: "DRAFT" }
+                    );
+
+                    toast("Payroll approved.");
+                    await load();
+                  } catch (error) {
+                    console.error("Approve payroll:", error);
+                    toast(error.message || "Could not approve payroll.", false);
+                  }
+                }],
+
+                ["Mark Paid", async payroll => {
+                  if (payroll.status !== "APPROVED") {
+                    return toast(
+                      "Approve the payroll before marking it paid.",
+                      false
+                    );
+                  }
+
+                  if (!confirm(
+                    "Mark " + money(payroll.netPayable) +
+                    " as paid to " + payroll.name + "?"
+                  )) return;
+
+                  try {
+                    const id = payroll.payrollId ?? payroll._id;
+                    if (id === null || id === undefined) {
+                      throw new Error("Payroll ID is missing.");
+                    }
+
+                    await updateRow(
+                      "monthlyPayrollSummary",
+                      id,
+                      { status: "PAID" },
+                      { status: "APPROVED" }
+                    );
+
+                    toast("Payroll marked as paid.");
+                    await load();
+                  } catch (error) {
+                    console.error("Mark payroll paid:", error);
+                    toast(error.message || "Could not mark payroll as paid.", false);
+                  }
+                }]
+              ]
+            });
+          };
+
+          pm.value = S.month;
+          ps.value = S.site;
+          pt.value = S.trade;
+
+          pm.onchange = event => {
+            S.month = event.target.value || S.month;
+            table();
+          };
+
+          ps.onchange = event => {
+            S.site = event.target.value;
+            table();
+          };
+
+          pt.onchange = event => {
+            S.trade = event.target.value;
+            table();
+          };
+
+          table();
+        } catch (error) {
+          console.error("Payroll loading error:", error);
+          content.innerHTML = `
+            <div class="bg-white border border-red-200 rounded-xl p-6 text-slate-800">
+              <h1 class="text-lg font-bold text-red-600">
+                Payroll couldn't load
+              </h1>
+              <p class="mt-2">${esc(error.message || "Could not load payroll data.")}</p>
+              <button id="retryPayroll"
+                class="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-lg">
+                Try again
+              </button>
+            </div>
+          `;
+
+          document.getElementById("retryPayroll")?.addEventListener(
+            "click",
+            () => load()
+          );
+        }
+      };
+
+      load();
+    });
+  </script>
+</body>
+</html>

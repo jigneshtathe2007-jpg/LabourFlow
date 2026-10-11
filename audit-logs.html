@@ -1,0 +1,24 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Audit Logs</title>
+<script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="./styles.css"></head>
+<body class="bg-[#0f172a] text-slate-300"><div id="app"></div>
+<script type="module">
+import { requireAuth } from "./js/auth.js";
+import { list } from "./js/utils.js";
+import { dataTable, esc } from "./js/ui.js";
+const cut = v => v ? `<span class="text-xs" title="${esc(v)}">${esc(v.length > 70 ? v.slice(0, 70) + "..." : v)}</span>` : "-";
+
+requireAuth("audit-logs", async ({ content }) => {
+  const logs = (await list("systemAuditLogs")).sort((a, b) => b.changedAt.localeCompare(a.changedAt));
+  const opt = k => [...new Set(logs.map(l => l[k]))].sort().map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+  content.innerHTML = `<div class="bg-[#1e293b] border border-slate-700 rounded-xl shadow p-4"><h1 class="text-lg font-semibold text-white mb-3">Audit Logs <span class="text-sm text-slate-400">(read-only)</span></h1>
+    <div class="flex flex-wrap gap-2 mb-3">
+      <select id="fu" class="bg-slate-900 border border-slate-600 rounded-lg p-2"><option value="">All users</option>${opt("changedByName")}</select>
+      <select id="fa" class="bg-slate-900 border border-slate-600 rounded-lg p-2"><option value="">All actions</option><option>INSERT</option><option>UPDATE</option><option>DELETE</option></select>
+      <select id="ft" class="bg-slate-900 border border-slate-600 rounded-lg p-2"><option value="">All tables</option>${opt("tableName")}</select>
+      <input id="fd" type="date" class="bg-slate-900 border border-slate-600 rounded-lg p-2"></div><div id="t"></div></div>`;
+  const draw = () => dataTable(document.getElementById("t"), { file: "audit-logs.csv",
+    rows: logs.filter(l => (!fu.value || l.changedByName === fu.value) && (!fa.value || l.actionType === fa.value) && (!ft.value || l.tableName === ft.value) && (!fd.value || l.changedAt.startsWith(fd.value))),
+    cols: [["changedAt", "Date/Time", v => esc(v.replace("T", " ").slice(0, 19))], ["changedByName", "User"], ["actionType", "Action"], ["tableName", "Table"], ["recordId", "Record ID"], ["oldValues", "Old Value", cut], ["newValues", "New Value", cut]] });
+  [fu, fa, ft, fd].forEach(e => (e.onchange = draw)); draw();
+});
+</script></body></html>

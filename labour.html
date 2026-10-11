@@ -1,0 +1,96 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Labour</title>
+<script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="./styles.css"></head>
+<body class="bg-[#0f172a] text-slate-300"><div id="app"></div>
+<script type="module">
+import { requireAuth } from "./js/auth.js";
+import { list, insertRow, updateRow, deleteRow, toast, money, today } from "./js/utils.js";
+import { dataTable, form, showModal, esc } from "./js/ui.js";
+const dayBefore = d => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); };
+const latest = rows => rows.sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0];
+
+requireAuth("labour", ({ content }) => {
+  const F = { site: "", trade: "", status: "" };
+  const load = async () => {
+    const [labs, sites, trades, lr, tr, cards, adv, extra, pay] = await Promise.all(
+      ["labours", "sites", "trades", "labourRateMaster", "tradeRateMaster", "attendanceCards", "advanceLedger", "extraWorkLogs", "monthlyPayrollSummary"].map(list));
+    const nameOf = (arr, key, id, field) => arr.find(x => x[key] === id)?.[field] || "-";
+    // Rate rule (same as the SQL stored procedure): worker-specific rate first, else the trade default rate
+    const rateOf = l => { const t = today(), ok = r => r.effectiveFrom <= t && (!r.effectiveTo || r.effectiveTo >= t);
+      const w = latest(lr.filter(r => r.labourId === l.labourId && ok(r))); if (w) return { rate: w.effectiveDailyRate, src: "Worker rate" };
+      const d = latest(tr.filter(r => r.tradeId === l.tradeId && ok(r))); return d ? { rate: d.baseDailyRate, src: "Trade default" } : { rate: 0, src: "None" }; };
+
+    content.innerHTML = `<div class="bg-[#1e293b] border border-slate-700 rounded-xl shadow p-4">
+      <div class="flex justify-between items-center mb-4"><h1 class="text-lg font-semibold text-white">Labour Management</h1>
+      <button id="add" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg">+ Add Labour</button></div>
+      <div class="flex gap-2 flex-wrap mb-3">
+        <select id="fs" class="bg-slate-900 border border-slate-600 rounded-lg p-2"><option value="">All sites</option>${sites.map(s => `<option value="${s.siteId}">${esc(s.siteName)}</option>`)}</select>
+        <select id="ft" class="bg-slate-900 border border-slate-600 rounded-lg p-2"><option value="">All trades</option>${trades.map(t => `<option value="${t.tradeId}">${esc(t.tradeName)}</option>`)}</select>
+        <select id="fa" class="bg-slate-900 border border-slate-600 rounded-lg p-2"><option value="">All status</option><option value="true">Active</option><option value="false">Inactive</option></select></div>
+      <div id="t"></div></div>`;
+
+    const fields = [["fullName", "Full Name", "text", "maxlength=100"], ["tradeId", "Trade", "select", trades.map(t => [t.tradeId, t.tradeName])],
+      ["currentSiteId", "Site", "select", sites.map(s => [s.siteId, s.siteName])], ["aadharNo", "Aadhar Number (12 digits)", "text", 'maxlength=12 inputmode="numeric"'],
+      ["bankAccNo", "Bank Account No (optional)", "text", "maxlength=20"], ["ifscCode", "IFSC Code (optional)", "text", "maxlength=11"],
+      ["isActive", "Status", "select", [["true", "Active"], ["false", "Inactive"]]]];
+    // validation = NOT NULL / UNIQUE(AadharNo) / CHAR(12) from the SQL schema
+    const check = (d, ownId) => {
+      const r = { fullName: d.fullName.trim(), tradeId: +d.tradeId, currentSiteId: +d.currentSiteId, aadharNo: d.aadharNo.trim(),
+        bankAccNo: d.bankAccNo.trim(), ifscCode: d.ifscCode.trim().toUpperCase(), isActive: d.isActive === "true" };
+      if (!r.fullName) throw new Error("Name is required.");
+      if (!r.tradeId || !r.currentSiteId) throw new Error("Select a trade and a site.");
+      if (!/^\d{12}$/.test(r.aadharNo)) throw new Error("Aadhar must be exactly 12 digits.");
+      if (labs.some(l => l.labourId !== ownId && l.aadharNo === r.aadharNo)) throw new Error("This Aadhar number is already registered.");
+      if (r.bankAccNo && !/^\d{9,20}$/.test(r.bankAccNo)) throw new Error("Bank account must be 9 to 20 digits.");
+      if (r.ifscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(r.ifscCode)) throw new Error("IFSC format is invalid (e.g. SBIN0001234).");
+      return r;
+    };
+    const saveRate = async (l, d) => {
+      const base = +d.baseDailyRate, hr = +d.hrAllowance || 0, cv = +d.convAllowance || 0;
+      if (!(base > 0)) throw new Error("Base rate must be greater than 0."); if (hr < 0 || cv < 0) throw new Error("Allowances cannot be negative.");
+      if (!d.effectiveFrom) throw new Error("Effective date is required.");
+      const cur = latest(lr.filter(r => r.labourId === l.labourId));
+      if (cur && d.effectiveFrom <= cur.effectiveFrom) throw new Error("New date must be after " + cur.effectiveFrom + ".");
+      if (cur) await updateRow("labourRateMaster", cur.rateId, { effectiveTo: dayBefore(d.effectiveFrom) }, { effectiveTo: cur.effectiveTo }); // history kept
+      await insertRow("labourRateMaster", "rateId", { labourId: l.labourId, baseDailyRate: base, hrAllowance: hr, convAllowance: cv, effectiveDailyRate: base + hr + cv, effectiveFrom: d.effectiveFrom, effectiveTo: null });
+    };
+    const rateFields = [["baseDailyRate", "Base Daily Rate (₹)", "number", 'min="1" step="0.01"'], ["hrAllowance", "HR Allowance (₹)", "number", 'min="0" step="0.01"'],
+      ["convAllowance", "Conveyance Allowance (₹)", "number", 'min="0" step="0.01"'], ["effectiveFrom", "Effective From", "date"]];
+
+    document.getElementById("add").onclick = () => {
+      if (!sites.length || !trades.length) return toast("Add sites and trades first.", false);
+      form("Add Labour", [...fields, ["baseDailyRate", "Worker-specific rate (₹, optional - blank = trade default)", "number", 'min="1" step="0.01"'], ["effectiveFrom", "Rate effective from", "date"]],
+        { isActive: "true", effectiveFrom: "2026-01-01" }, async d => {
+          const rec = check(d), id = await insertRow("labours", "labourId", rec);
+          if (d.baseDailyRate) await saveRate({ labourId: id }, { baseDailyRate: d.baseDailyRate, hrAllowance: 0, convAllowance: 0, effectiveFrom: d.effectiveFrom });
+          toast("Labour added successfully."); load(); });
+    };
+
+    const table = () => {
+      const rows = labs.filter(l => (!F.site || l.currentSiteId == F.site) && (!F.trade || l.tradeId == F.trade) && (!F.status || String(l.isActive) === F.status))
+        .map(l => ({ ...l, tradeName: nameOf(trades, "tradeId", l.tradeId, "tradeName"), siteName: nameOf(sites, "siteId", l.currentSiteId, "siteName"), statusText: l.isActive ? "Active" : "Inactive", ...rateOf(l) }));
+      dataTable(document.getElementById("t"), { file: "labour.csv", rows,
+        cols: [["labourId", "ID"], ["fullName", "Name"], ["tradeName", "Trade"], ["siteName", "Site"], ["aadharNo", "Aadhar"], ["bankAccNo", "Bank A/C"], ["rate", "Daily Rate", (v, r) => `${money(v)} <span class="text-xs text-slate-500">${esc(r.src)}</span>`],
+          ["statusText", "Status", v => `<span class="px-2 py-0.5 rounded text-xs text-white ${v === "Active" ? "bg-green-600" : "bg-slate-600"}">${v}</span>`]],
+        actions: [
+          ["View", l => showModal(l.fullName, `<div class="space-y-1">${[["Labour ID", l.labourId], ["Trade", l.tradeName], ["Site", l.siteName], ["Aadhar", l.aadharNo], ["Bank A/C", l.bankAccNo || "-"], ["IFSC", l.ifscCode || "-"], ["Status", l.statusText], ["Current rate", money(l.rate) + " (" + l.src + ")"]]
+            .map(([a, b]) => `<div><span class="text-slate-400">${a}:</span> ${esc(b)}</div>`).join("")}</div>
+            <h4 class="text-white mt-4 mb-1">Worker rate history</h4><table class="w-full"><tr class="text-left text-slate-400"><th>Base</th><th>HR</th><th>Conv</th><th>Total</th><th>From</th><th>To</th></tr>
+            ${lr.filter(r => r.labourId === l.labourId).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom)).map(r => `<tr class="border-t border-slate-700"><td>${money(r.baseDailyRate)}</td><td>${money(r.hrAllowance)}</td><td>${money(r.convAllowance)}</td><td>${money(r.effectiveDailyRate)}</td><td>${esc(r.effectiveFrom)}</td><td>${esc(r.effectiveTo || "Current")}</td></tr>`).join("") || '<tr><td colspan="6" class="py-2 text-slate-500">No worker-specific rate (trade default applies)</td></tr>'}</table>`)],
+          ["Edit", l => form("Edit Labour", fields, { ...l, isActive: String(l.isActive) }, async d => {
+            const rec = check(d, l.labourId), { fullName, tradeId, currentSiteId, aadharNo, bankAccNo, ifscCode, isActive } = l;
+            await updateRow("labours", l.labourId, rec, { fullName, tradeId, currentSiteId, aadharNo, bankAccNo, ifscCode, isActive }); toast("Labour updated successfully."); load(); })],
+          ["Set Rate", l => form(`Worker rate: ${l.fullName}`, rateFields, { baseDailyRate: l.rate, hrAllowance: 0, convAllowance: 0, effectiveFrom: today() }, async d => {
+            await saveRate(l, d); toast("Rate saved. Old rate kept in history."); load(); })],
+          ["Delete", async l => {
+            // foreign key rule: child rows block deletion
+            if ([cards, adv, extra, pay].some(a => a.some(x => x.labourId === l.labourId))) return toast("Cannot delete: attendance, advance or payroll records exist. Mark the worker Inactive instead.", false);
+            if (!confirm(`Delete ${l.fullName}?`)) return;
+            for (const r of lr.filter(r => r.labourId === l.labourId)) await deleteRow("labourRateMaster", r.rateId, r);
+            await deleteRow("labours", l.labourId, { fullName: l.fullName, aadharNo: l.aadharNo }); toast("Labour deleted."); load(); }]] });
+    };
+    fs.onchange = e => { F.site = e.target.value; table(); }; ft.onchange = e => { F.trade = e.target.value; table(); }; fa.onchange = e => { F.status = e.target.value; table(); };
+    fs.value = F.site; ft.value = F.trade; fa.value = F.status; table();
+  };
+  load();
+});
+</script></body></html>

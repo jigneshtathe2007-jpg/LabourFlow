@@ -1,0 +1,250 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+
+<body class="bg-[#0f172a] text-slate-300">
+  <div id="app"></div>
+
+  <script type="module">
+    import { requireAuth } from "./js/auth.js";
+    import { list, toast, money, today } from "./js/utils.js";
+import { seedMasters, resetMasters } from "./js/seed.js";
+
+    const esc = v => String(v ?? "").replace(/[&<>"']/g, c =>
+      ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])
+    );
+    const dateKey = value => {
+  if (!value) return "";
+
+  const s = String(value);
+
+  // Plain MySQL DATE: keep the date as-is.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return s;
+  }
+
+  // ISO timestamps: convert back to the browser's local date.
+  const d = new Date(s);
+
+  if (!Number.isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  return s.slice(0, 10);
+};
+
+const localToday = dateKey(new Date());
+const localMonth = localToday.slice(0, 7);
+
+    requireAuth("dashboard", async ({ role, profile, content }) => {
+      content.innerHTML = `
+        <div class="bg-white rounded-xl p-6 text-slate-800">
+          <h1 class="text-xl font-bold">Loading dashboard...</h1>
+          <p class="text-slate-500 mt-2">Fetching your workforce data.</p>
+        </div>`;
+
+      try {
+        const [sites, trades, labours, logs, payroll] = await Promise.all([
+          list("sites"),
+          list("trades"),
+          list("labourers"),
+          list("attendance"),
+          list("payroll")
+        ]);
+
+        const month = localMonth;
+        const monthRows = payroll.filter(p =>
+          String(p.month_year ?? p.monthYear ?? "").slice(0, 7) === month
+        );
+
+        const totalPayroll = monthRows.reduce(
+          (sum, p) => sum + (Number(p.net_payable ?? p.netPayable) || 0), 0
+        );
+
+        const pending = monthRows
+          .filter(p => String(p.status || "").toUpperCase() !== "PAID")
+          .reduce((sum, p) =>
+            sum + (Number(p.net_payable ?? p.netPayable) || 0), 0
+          );
+
+        const todayLogs = logs.filter(r =>
+  dateKey(r.attendanceDate ?? r.logDate) === localToday
+).length;
+
+        const months = Array.from({ length: 6 }, (_, i) => {
+          const d = new Date();
+          d.setDate(1);
+          d.setMonth(d.getMonth() - (5 - i));
+          return d.toISOString().slice(0, 7);
+        });
+
+        const series = months.map(m => ({
+          month: m,
+          total: payroll
+            .filter(p => String(p.month_year ?? p.monthYear ?? "").slice(0, 7) === m)
+            .reduce((sum, p) =>
+              sum + (Number(p.net_payable ?? p.netPayable) || 0), 0)
+        }));
+
+        const max = Math.max(1, ...series.map(x => x.total));
+
+        const chart = series.some(x => x.total > 0)
+          ? `<svg viewBox="0 0 600 180" role="img"
+                aria-label="Monthly payroll totals"
+                style="width:100%;height:auto;display:block">
+              ${[35,75,115,155].map(y =>
+                `<line x1="38" y1="${y}" x2="585" y2="${y}"
+                  stroke="#e2e8f0" stroke-width="1"/>`
+              ).join("")}
+              <path d="${series.map((x,i) =>
+                `${i ? "L" : "M"} ${48+i*105} ${155-(x.total/max)*115}`
+              ).join(" ")} L 573 155 L 48 155 Z"
+                fill="#4f46e5" opacity=".09"/>
+              <path d="${series.map((x,i) =>
+                `${i ? "L" : "M"} ${48+i*105} ${155-(x.total/max)*115}`
+              ).join(" ")}"
+                fill="none" stroke="#4f46e5" stroke-width="3"
+                stroke-linecap="round" stroke-linejoin="round"/>
+              ${series.map((x,i) => `
+                <circle cx="${48+i*105}" cy="${155-(x.total/max)*115}"
+                  r="4" fill="#4f46e5"/>
+                <text x="${48+i*105}" y="174" text-anchor="middle"
+                  fill="#64748b" font-size="11">
+                  ${new Date(x.month+"-01").toLocaleDateString("en-IN",{month:"short"})}
+                </text>
+              `).join("")}
+            </svg>`
+          : `<div class="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">
+               No payroll records for the last six months yet.
+             </div>`;
+
+        const cards = [
+          ["Sites", sites.length, "Active project locations"],
+          ["Trades & rates", trades.length, "Configured work categories"],
+          ["Labourers", labours.length, "Registered workforce"],
+          ["Today's attendance", todayLogs, "Attendance entries today"]
+        ];
+
+        content.innerHTML = `
+          <div class="flex flex-wrap items-start justify-between gap-3 mb-6">
+            <div>
+              <div class="text-xs font-semibold tracking-widest text-slate-500 mb-2">
+                OVERVIEW / DASHBOARD
+              </div>
+              <h1>Welcome back, ${esc(profile.fullName || "Admin")}</h1>
+              <p class="text-slate-500 mt-1">
+                Here is what's happening across your workforce today.
+              </p>
+            </div>
+            <div class="text-sm text-slate-500 bg-white border border-slate-200 rounded-lg px-3 py-2">
+              ${new Date().toLocaleDateString("en-IN", {
+                weekday:"short", day:"numeric", month:"short", year:"numeric"
+              })}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
+            ${cards.map(([label,value,sub],i) => `
+              <section class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+                <div class="flex justify-between items-start">
+                  <span class="text-sm font-medium text-slate-500">${label}</span>
+                  <span class="w-9 h-9 flex items-center justify-center rounded-lg
+                    ${["bg-indigo-50 text-indigo-600","bg-sky-50 text-sky-600",
+                       "bg-violet-50 text-violet-600","bg-emerald-50 text-emerald-600"][i]}"
+                    aria-hidden="true">${["▦","◇","♙","✓"][i]}</span>
+                </div>
+                <div class="text-3xl font-bold text-slate-900 mt-3">${value}</div>
+                <div class="text-xs text-slate-500 mt-2">${sub}</div>
+              </section>
+            `).join("")}
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+            <section class="xl:col-span-2 bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+              <div class="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <h2 class="text-base font-semibold">Payroll trend</h2>
+                  <p class="text-sm text-slate-500 mt-1">
+                    Net payable by month · based on saved payroll records
+                  </p>
+                </div>
+                <span class="text-xs bg-indigo-50 text-indigo-700 rounded-full px-3 py-1">
+                  Last 6 months
+                </span>
+              </div>
+              ${chart}
+              <div class="border-t border-slate-100 pt-4 mt-3 flex flex-wrap gap-8">
+                <div>
+                  <div class="text-xs text-slate-500">Current month payroll</div>
+                  <div class="text-xl font-bold text-slate-900 mt-1">${money(totalPayroll)}</div>
+                </div>
+                <div>
+                  <div class="text-xs text-slate-500">Outstanding payroll</div>
+                  <div class="text-xl font-bold text-amber-600 mt-1">${money(pending)}</div>
+                </div>
+                <div>
+                  <div class="text-xs text-slate-500">Records this month</div>
+                  <div class="text-xl font-bold text-slate-900 mt-1">${monthRows.length}</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+              <h2 class="text-base font-semibold">Quick actions</h2>
+              <p class="text-sm text-slate-500 mt-1 mb-4">Common workspace tasks</p>
+              <div class="space-y-2">
+                <a class="block rounded-lg border border-slate-200 px-3 py-3 hover:bg-slate-50"
+                   href="labour.html">
+                  <span class="block font-semibold text-slate-800">Manage labourers</span>
+                  <span class="text-xs text-slate-500">View workforce records</span>
+                </a>
+                <a class="block rounded-lg border border-slate-200 px-3 py-3 hover:bg-slate-50"
+                   href="hajiri.html">
+                  <span class="block font-semibold text-slate-800">Record attendance</span>
+                  <span class="text-xs text-slate-500">Daily Hajiri entry</span>
+                </a>
+                <a class="block rounded-lg border border-slate-200 px-3 py-3 hover:bg-slate-50"
+                   href="payroll.html">
+                  <span class="block font-semibold text-slate-800">Open payroll</span>
+                  <span class="text-xs text-slate-500">Generate and review wages</span>
+                </a>
+                ${role === "ADMIN" ? '<button id="seed" class="w-full text-left rounded-lg bg-indigo-600 text-white px-3 py-3">Load missing master data</button>' : ""}
+              </div>
+            </section>
+          </div>`;
+        document.getElementById("seed")?.addEventListener("click", async e => { e.target.disabled=true; try { await seedMasters(); toast("Master data loaded."); location.reload(); } catch (err) { toast(err.message, false); e.target.disabled=false; } });
+        document.getElementById("reset")?.addEventListener("click", async e => { if (!confirm("Delete master data?")) return; e.target.disabled=true; try { await resetMasters(); toast("Master data reset."); location.reload(); } catch (err) { toast(err.message, false); e.target.disabled=false; } });
+      } catch (error) {
+        console.error("Dashboard loading error:", error);
+        content.innerHTML = `
+          <section class="bg-white border border-red-200 rounded-xl p-6 text-slate-800">
+            <h1 class="text-xl font-bold text-red-600">Dashboard data couldn't load</h1>
+            <p class="mt-2 text-slate-600">
+              ${esc(error.message || "Could not connect to the API.")}
+            </p>
+            <p class="mt-2 text-sm text-slate-500">
+              The dashboard now needs working MySQL API endpoints for sites, trades,
+              labourers, attendance and payroll.
+            </p>
+            <button id="retry" class="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-white">
+              Try again
+            </button>
+          </section>`;
+
+        document.getElementById("retry")?.addEventListener("click", () => location.reload());
+        toast("Dashboard data failed to load.", false);
+      }
+    });
+  </script>
+</body>
+</html>

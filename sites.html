@@ -1,0 +1,42 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sites</title>
+<script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="./styles.css"></head>
+<body class="bg-[#0f172a] text-slate-300"><div id="app"></div>
+<script type="module">
+import { requireAuth } from "./js/auth.js";
+import { list, insertRow, updateRow, deleteRow, toast, today } from "./js/utils.js";
+import { dataTable, form } from "./js/ui.js";
+
+requireAuth("sites", ({ content }) => {
+  const load = async () => {
+    const [sites, labours, sups, users] = await Promise.all(["sites", "labours", "supervisors", "users"].map(list));
+    content.innerHTML = `<div class="bg-[#1e293b] border border-slate-700 rounded-xl shadow p-4">
+      <div class="flex justify-between items-center mb-4"><h1 class="text-lg font-semibold text-white">Site Management</h1>
+      <button id="add" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg">+ Add Site</button></div><div id="t"></div></div>`;
+
+    const fields = [["siteName", "Site Name", "text", "maxlength=100"], ["location", "Location", "text", "maxlength=150"]];
+    // validation = NOT NULL + UNIQUE(SiteName) from the SQL schema
+    const check = (d, ownId) => {
+      d.siteName = d.siteName.trim(); d.location = d.location.trim();
+      if (!d.siteName) throw new Error("Site name is required.");
+      if (sites.some(s => s.siteId !== ownId && s.siteName.toLowerCase() === d.siteName.toLowerCase())) throw new Error("A site with this name already exists.");
+    };
+    document.getElementById("add").onclick = () => form("Add Site", fields, {}, async d => {
+      check(d); await insertRow("sites", "siteId", { siteName: d.siteName, location: d.location, createdDate: today() });
+      toast("Site added successfully."); load(); });
+
+    dataTable(document.getElementById("t"), { file: "sites.csv",
+      rows: sites.map(s => ({ ...s, labourCount: labours.filter(l => l.currentSiteId === s.siteId).length, supervisor: sups.filter(x => x.siteId === s.siteId).map(x => (users.find(u => u._id === x.userId)?.fullName) || "Supervisor " + x.supervisorId).join(", ") || "-" })),
+      cols: [["siteId", "Site ID"], ["siteName", "Site Name"], ["location", "Location"], ["labourCount", "Labour"], ["supervisor", "Supervisor"], ["createdDate", "Created"]],
+      actions: [
+        ["Edit", s => form("Edit Site", fields, s, async d => { check(d, s.siteId);
+          await updateRow("sites", s.siteId, { siteName: d.siteName, location: d.location }, { siteName: s.siteName, location: s.location });
+          toast("Site updated successfully."); load(); })],
+        ["Delete", async s => {
+          // foreign key rule: cannot delete a parent row that child rows point to
+          if (s.labourCount || sups.some(x => x.siteId === s.siteId)) return toast("Cannot delete: labour or supervisors are linked to this site.", false);
+          if (!confirm(`Delete site "${s.siteName}"?`)) return;
+          await deleteRow("sites", s.siteId, { siteName: s.siteName, location: s.location }); toast("Site deleted."); load(); }]] });
+  };
+  load();
+});
+</script></body></html>

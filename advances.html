@@ -1,0 +1,52 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Advances</title>
+<script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="./styles.css"></head>
+<body class="bg-[#0f172a] text-slate-300"><div id="app"></div>
+<script type="module">
+import { requireAuth } from "./js/auth.js";
+import { list, insertRow, updateRow, toast, money, today } from "./js/utils.js";
+import { dataTable, form, esc } from "./js/ui.js";
+const badge = v => `<span class="px-2 py-0.5 rounded text-xs text-white ${{ OPEN: "bg-amber-500", PENDING: "bg-amber-500", DRAFT: "bg-amber-500", APPROVED: "bg-indigo-600", DEDUCTED: "bg-green-600", PAID: "bg-green-600", REJECTED: "bg-red-600" }[v] || "bg-slate-600"}">${v}</span>`;
+
+requireAuth("advances", ({ user, role, content }) => {
+  const S = { status: "" };
+  const load = async () => {
+    const [adv, labs, sups] = await Promise.all(["advanceLedger", "labours", "supervisors"].map(list));
+    const users = role === "ADMIN" ? await list("users") : [];
+    const mySup = role === "SUPERVISOR" ? sups.find(s => Number(s.userId) === Number(user.id)) : null;
+    if (role === "SUPERVISOR" && !mySup) return (content.innerHTML = '<p class="text-red-400">Your login is not linked to a supervisor record.</p>');
+    const myLabs = labs.filter(l => l.isActive && (!mySup || l.currentSiteId === mySup.siteId));
+    const nm = id => labs.find(l => l.labourId === id)?.fullName || "-";
+    const canAdd = role !== "FINANCE";
+    content.innerHTML = `<div class="bg-[#1e293b] border border-slate-700 rounded-xl shadow p-4">
+      <div class="flex flex-wrap gap-2 items-center mb-3"><h1 class="text-lg font-semibold text-white mr-auto">Advance Ledger</h1>
+      <select id="fst" class="bg-slate-900 border border-slate-600 rounded-lg p-2"><option value="">All status</option><option>OPEN</option><option>DEDUCTED</option></select>
+      ${canAdd ? '<button id="add" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg">+ Give Advance</button>' : ""}</div>
+      <div id="sum" class="text-sm text-slate-400 mb-2"></div><div id="t"></div></div>`;
+    if (canAdd) document.getElementById("add").onclick = () => {
+      if (!myLabs.length) return toast("No active labour available.", false);
+      const f = [["labourId", "Labour", "select", myLabs.map(l => [l.labourId, l.fullName])], ["dateGiven", "Date", "date", 'max="' + today() + '"'],
+        ["advanceAmount", "Advance Amount (₹)", "number", 'min="1" step="0.01"'], ["confirmationRef", "Remarks / Confirmation Ref", "text", "maxlength=255"]];
+      if (role === "ADMIN") f.push(["supervisorId", "Given via supervisor", "select", sups.map(s => [s.supervisorId, users.find(u => u._id === s.userId)?.fullName || "Supervisor " + s.supervisorId])]);
+      form("Give Advance", f, { dateGiven: today() }, async d => {
+        if (!(+d.advanceAmount > 0)) throw new Error("Amount must be greater than 0."); if (!d.dateGiven || d.dateGiven > today()) throw new Error("Enter a valid date (not in the future).");
+        const supervisorId = mySup ? mySup.supervisorId : +d.supervisorId; if (!supervisorId) throw new Error("Add a supervisor first.");
+        await insertRow("advanceLedger", "advanceId", { labourId: +d.labourId, supervisorId, dateGiven: d.dateGiven, advanceAmount: +d.advanceAmount, confirmationRef: d.confirmationRef.trim(), settlementStatus: "OPEN", deductedInMonth: null });
+        toast("Advance recorded successfully."); load(); });
+    };
+    const table = () => {
+      const rows = adv.filter(a => (!mySup || labs.find(l => l.labourId === a.labourId)?.currentSiteId === mySup.siteId) && (!S.status || a.settlementStatus === S.status)).map(a => ({ ...a, name: nm(a.labourId) }))
+        .sort((a, b) => b.dateGiven.localeCompare(a.dateGiven));
+      sum.textContent = "Open advances: " + money(rows.filter(r => r.settlementStatus === "OPEN").reduce((s, r) => s + r.advanceAmount, 0));
+      dataTable(document.getElementById("t"), { file: "advances.csv", rows,
+        cols: [["name", "Labour"], ["dateGiven", "Date"], ["advanceAmount", "Amount", v => money(v)], ["confirmationRef", "Remarks"], ["settlementStatus", "Status", badge], ["deductedInMonth", "Deducted Month"]],
+        actions: role === "SUPERVISOR" ? [] : [["Mark Deducted", a => { if (a.settlementStatus === "DEDUCTED") return toast("Already deducted.", false);
+          form("Mark Deducted", [["deductedInMonth", "Deducted in month", "month"]], { deductedInMonth: today().slice(0, 7) }, async d => {
+            if (!d.deductedInMonth) throw new Error("Select a month.");
+            await updateRow("advanceLedger", a.advanceId, { settlementStatus: "DEDUCTED", deductedInMonth: d.deductedInMonth }, { settlementStatus: a.settlementStatus, deductedInMonth: a.deductedInMonth });
+            toast("Marked as deducted."); load(); }); }]] });
+    };
+    fst.value = S.status; fst.onchange = e => { S.status = e.target.value; table(); }; table();
+  };
+  load();
+});
+</script></body></html>

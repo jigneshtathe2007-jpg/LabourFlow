@@ -1,0 +1,50 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Extra Work</title>
+<script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="./styles.css"></head>
+<body class="bg-[#0f172a] text-slate-300"><div id="app"></div>
+<script type="module">
+import { requireAuth } from "./js/auth.js";
+import { list, insertRow, updateRow, toast, money, today } from "./js/utils.js";
+import { dataTable, form, esc } from "./js/ui.js";
+const badge = v => `<span class="px-2 py-0.5 rounded text-xs text-white ${{ OPEN: "bg-amber-500", PENDING: "bg-amber-500", DRAFT: "bg-amber-500", APPROVED: "bg-indigo-600", DEDUCTED: "bg-green-600", PAID: "bg-green-600", REJECTED: "bg-red-600" }[v] || "bg-slate-600"}">${v}</span>`;
+
+requireAuth("extra-work", ({ user, role, content }) => {
+  const S = { status: "" };
+  const load = async () => {
+    const [ex, labs, sites, sups] = await Promise.all(["extraWorkLogs", "labours", "sites", "supervisors"].map(list));
+    const mySup = role === "SUPERVISOR" ? sups.find(s => Number(s.userId) === Number(user.id)) : null;
+    if (role === "SUPERVISOR" && !mySup) return (content.innerHTML = '<p class="text-red-400">Your login is not linked to a supervisor record.</p>');
+    const myLabs = labs.filter(l => l.isActive && (!mySup || l.currentSiteId === mySup.siteId));
+    const canAdd = role !== "FINANCE", canApprove = role !== "SUPERVISOR";
+    content.innerHTML = `<div class="bg-[#1e293b] border border-slate-700 rounded-xl shadow p-4">
+      <div class="flex flex-wrap gap-2 items-center mb-3"><h1 class="text-lg font-semibold text-white mr-auto">Extra Work</h1>
+      <select id="fst" class="bg-slate-900 border border-slate-600 rounded-lg p-2"><option value="">All status</option><option>PENDING</option><option>APPROVED</option><option>REJECTED</option></select>
+      ${canAdd ? '<button id="add" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg">+ Add Extra Work</button>' : ""}</div><div id="t"></div></div>`;
+    if (canAdd) document.getElementById("add").onclick = () => {
+      if (!myLabs.length) return toast("No active labour available.", false);
+      const f = [["labourId", "Labour", "select", myLabs.map(l => [l.labourId, l.fullName])]];
+      if (!mySup) f.push(["siteId", "Site", "select", sites.map(s => [s.siteId, s.siteName])]);
+      f.push(["workDate", "Date", "date", 'max="' + today() + '"'], ["jobDescription", "Job Description", "text", "maxlength=500"], ["hours", "Hours", "number", 'min="0.5" max="24" step="0.5"'], ["requestedAmount", "Requested Amount (₹)", "number", 'min="1" step="0.01"']);
+      form("Add Extra Work", f, { workDate: today() }, async d => {
+        if (!d.jobDescription.trim()) throw new Error("Job description is required."); if (!(+d.hours > 0)) throw new Error("Hours must be greater than 0."); if (!(+d.requestedAmount > 0)) throw new Error("Amount must be greater than 0.");
+        if (!d.workDate || d.workDate > today()) throw new Error("Enter a valid date (not in the future).");
+        await insertRow("extraWorkLogs", "extraWorkId", { labourId: +d.labourId, siteId: mySup ? mySup.siteId : +d.siteId, workDate: d.workDate, jobDescription: d.jobDescription.trim(), hours: +d.hours,
+          requestedAmount: +d.requestedAmount, approvedAmount: null, approvedBy: null, status: "PENDING" });
+        toast("Extra work submitted for approval."); load(); });
+    };
+    const act = async (e, status, amount) => { await updateRow("extraWorkLogs", e.extraWorkId, { status, approvedAmount: amount, approvedBy: user.id }, { status: e.status, approvedAmount: e.approvedAmount });
+      toast(status === "APPROVED" ? "Extra work approved. It will be included in payroll." : "Extra work rejected."); load(); };
+    const table = () => {
+      const rows = ex.filter(e => (!mySup || e.siteId === mySup.siteId) && (!S.status || e.status === S.status)).map(e => ({ ...e, name: labs.find(l => l.labourId === e.labourId)?.fullName || "-", siteName: sites.find(s => s.siteId === e.siteId)?.siteName || "-" }))
+        .sort((a, b) => b.workDate.localeCompare(a.workDate));
+      dataTable(document.getElementById("t"), { file: "extra-work.csv", rows,
+        cols: [["name", "Labour"], ["siteName", "Site"], ["workDate", "Date"], ["jobDescription", "Job"], ["hours", "Hrs"], ["requestedAmount", "Requested", v => money(v)], ["approvedAmount", "Approved", v => v == null ? "-" : money(v)], ["status", "Status", badge]],
+        actions: canApprove ? [
+          ["Approve", e => { if (e.status !== "PENDING") return toast("Already " + e.status.toLowerCase() + ".", false);
+            form("Approve Extra Work", [["approvedAmount", "Approved Amount (₹)", "number", 'min="1" step="0.01"']], { approvedAmount: e.requestedAmount }, async d => { if (!(+d.approvedAmount > 0)) throw new Error("Amount must be greater than 0."); await act(e, "APPROVED", +d.approvedAmount); }); }],
+          ["Reject", async e => { if (e.status !== "PENDING") return toast("Already " + e.status.toLowerCase() + ".", false); if (confirm("Reject this extra work?")) await act(e, "REJECTED", 0); }]] : [] });
+    };
+    fst.value = S.status; fst.onchange = e => { S.status = e.target.value; table(); }; table();
+  };
+  load();
+});
+</script></body></html>

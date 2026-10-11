@@ -1,0 +1,98 @@
+/* LabourFlow light enterprise theme — shared by every page */
+:root{color-scheme:light;--lf-bg:#f5f7fb;--lf-surface:#fff;--lf-text:#172033;--lf-muted:#64748b;--lf-border:#e2e8f0;--lf-primary:#4f46e5;--lf-primary-hover:#4338ca;--lf-soft:#eef2ff;--lf-shadow:0 1px 3px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.035)}
+*{box-sizing:border-box}html{background:var(--lf-bg)}body{background:var(--lf-bg)!important;color:var(--lf-text)!important;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.5;font-size:14px}body:has(#app){min-height:100vh}#app{min-height:100vh}a{color:inherit;text-decoration:none}button,input,select,textarea{font:inherit}button{transition:background-color .15s,border-color .15s,box-shadow .15s,transform .15s}button:not(:disabled){cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #a5b4fc;outline-offset:2px}
+/* Override existing utility classes so page logic and markup stay intact */
+.bg-\[\#0f172a\]{background:var(--lf-bg)!important}.bg-\[\#1e293b\]{background:var(--lf-surface)!important}.bg-slate-900{background:#f8fafc!important}.bg-slate-800{background:#f1f5f9!important}.bg-slate-700{background:#e2e8f0!important}.border-slate-700,.border-slate-600{border-color:var(--lf-border)!important}.text-slate-300{color:#334155!important}.text-slate-400,.text-slate-500{color:var(--lf-muted)!important}.text-white{color:var(--lf-text)!important}.hover\:bg-slate-700:hover,.hover\:bg-slate-600:hover{background:#eef2ff!important}.bg-indigo-600{background:var(--lf-primary)!important;color:#fff!important}.hover\:bg-indigo-500:hover{background:var(--lf-primary-hover)!important}.bg-indigo-600.text-white,.bg-indigo-600 .text-white{color:#fff!important}.bg-red-600,.bg-red-500{color:#fff!important}.rounded-xl{border-radius:14px!important}.rounded-lg{border-radius:10px!important}.shadow,.shadow-lg{box-shadow:var(--lf-shadow)!important}
+/* App shell */
+#app>div{min-height:100vh}#side{background:#fff!important;border-right:1px solid var(--lf-border)!important;padding:22px 16px!important;width:250px!important;box-shadow:1px 0 0 rgba(15,23,42,.015)}#side>div:first-child{color:#172033!important;font-size:18px;letter-spacing:-.035em;display:flex;align-items:center;gap:10px;margin:0 0 26px!important}#side>div:first-child:before{content:"LP";display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;background:var(--lf-primary);color:white;font-size:12px;font-weight:800;letter-spacing:0}#side nav{display:grid;gap:5px}#side nav a,#side nav span{display:flex!important;align-items:center;min-height:40px;padding:10px 12px!important;border-radius:9px!important;font-size:13px;font-weight:550;color:#475569!important;transition:all .15s}#side nav a:hover{background:#f1f5f9!important;color:#312e81!important}#side nav a.bg-indigo-600{background:#eef2ff!important;color:#4338ca!important;font-weight:700;box-shadow:inset 3px 0 #4f46e5}#side nav span{color:#94a3b8!important}#side #logout{font-weight:600;color:#dc2626!important;margin-top:26px!important;padding:8px 12px;border-radius:8px}#side #logout:hover{background:#fef2f2}#side .text-xs{font-size:12px!important;line-height:1.6}#app main{padding:30px!important;min-width:0}#app main>button:first-child{background:#fff!important;border:1px solid var(--lf-border);color:#334155!important}#content{max-width:1600px;margin:0 auto}#content h1{font-size:25px!important;letter-spacing:-.04em;line-height:1.25;margin-bottom:6px!important;color:#172033!important}#content h2{color:#172033}#content h3{color:#172033}
+/* Panels, tables and controls */
+#content .bg-\[\#1e293b\],#content .bg-slate-800{background:#fff!important;border-color:var(--lf-border)!important;box-shadow:var(--lf-shadow)}#content table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}#content table th{background:#f8fafc;color:#64748b!important;font-size:11px;text-transform:uppercase;letter-spacing:.055em;font-weight:700;padding:12px 14px!important;border-bottom:1px solid var(--lf-border);white-space:nowrap}#content table td{padding:12px 14px!important;color:#334155;border-bottom:1px solid #edf1f6;vertical-align:middle}#content table tr:last-child td{border-bottom:0}#content table tr:hover td{background:#fafbff}#content input:not([type=checkbox]):not([type=radio]),#content select,#content textarea,#f input:not([type=checkbox]){background:#fff!important;border:1px solid #cbd5e1!important;border-radius:9px!important;padding:10px 12px!important;color:#172033!important;min-height:40px;max-width:100%}#content input::placeholder,#f input::placeholder{color:#94a3b8}#content input[type=checkbox],#f input[type=checkbox]{accent-color:var(--lf-primary)}#content button,#f button{border-radius:9px;font-weight:600}#content button.bg-indigo-600,#f button.bg-indigo-600{background:var(--lf-primary)!important;color:white!important}#content button.bg-indigo-600:hover,#f button:hover{filter:brightness(.97)}#content .border-t{border-color:var(--lf-border)!important}#content .text-red-400{color:#dc2626!important}#content .text-green-400{color:#15803d!important}#content .text-amber-400{color:#b45309!important}#content .fixed{color:white}#content .overflow-x-auto{max-width:100%}
+/* Login page */
+body:has(#f){background:radial-gradient(circle at 15% 10%,#e0e7ff 0,transparent 30%),radial-gradient(circle at 90% 90%,#dbeafe 0,transparent 28%),#f8fafc!important}#f{background:#fff!important;border:1px solid var(--lf-border)!important;border-radius:18px!important;padding:32px!important;box-shadow:0 20px 60px rgba(15,23,42,.10)!important;max-width:420px!important}#f h1{color:#172033!important;font-size:24px!important;line-height:1.25;letter-spacing:-.04em}#f h1:before{content:"LP";display:flex;align-items:center;justify-content:center;width:44px;height:44px;background:#4f46e5;color:#fff;border-radius:13px;font-size:15px;letter-spacing:0;margin-bottom:20px}#f input:not([type=checkbox]){width:100%;min-height:46px}#f label{color:#475569!important}#f button{min-height:46px;background:var(--lf-primary)!important;color:white!important;font-size:14px;font-weight:700}#f button:hover{background:var(--lf-primary-hover)!important}
+/* Responsive layout */
+@media(max-width:767px){#side{width:100%!important;border-right:0!important;border-bottom:1px solid var(--lf-border)!important;padding:14px!important}#side nav{grid-template-columns:repeat(2,minmax(0,1fr))}#app main{padding:18px 14px!important}#content h1{font-size:22px!important}#content .grid{gap:10px!important}#content table{min-width:620px}#f{padding:24px!important}}
+@media print{body{background:#fff!important}#side{display:none!important}#app main{padding:0!important}#content .bg-\[\#1e293b\]{box-shadow:none!important}}
+
+/* ─────────────────────────────────────────────────────────────
+   LabourFlow Liquid Crystal layer — decorative only; no app logic
+   ───────────────────────────────────────────────────────────── */
+:root{
+  --lf-glass:rgba(255,255,255,.78);
+  --lf-glass-strong:rgba(255,255,255,.91);
+  --lf-aura:rgba(129,140,248,.15);
+  --lf-aqua:rgba(103,232,249,.13);
+  --lf-rose:rgba(244,114,182,.09);
+  --lf-ease:cubic-bezier(.2,.75,.25,1);
+}
+html{scroll-behavior:smooth}
+body{isolation:isolate;overflow-x:hidden}
+/* Soft aurora glows behind the real interface */
+body:before{
+  content:"";position:fixed;inset:-18%;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(ellipse at 10% 12%,var(--lf-aura),transparent 35%),
+    radial-gradient(ellipse at 88% 18%,var(--lf-aqua),transparent 31%),
+    radial-gradient(ellipse at 78% 92%,var(--lf-rose),transparent 33%),
+    radial-gradient(ellipse at 35% 85%,rgba(165,180,252,.10),transparent 36%);
+  filter:blur(22px);transform:translate3d(0,0,0);
+  animation:lf-aurora-drift 22s ease-in-out infinite alternate;
+}
+@keyframes lf-aurora-drift{
+  0%{transform:translate3d(-1.2%,0,0) scale(1)}
+  50%{transform:translate3d(1%,1.2%,0) scale(1.035)}
+  100%{transform:translate3d(-.5%,-1%,0) scale(1.015)}
+}
+/* Glassy sidebar and top-level surfaces */
+#side{background:rgba(255,255,255,.82)!important;backdrop-filter:blur(22px) saturate(145%);-webkit-backdrop-filter:blur(22px) saturate(145%);box-shadow:8px 0 36px rgba(51,65,85,.035)!important}
+#side>div:first-child:before{box-shadow:0 7px 18px rgba(79,70,229,.24);background:linear-gradient(145deg,#6963ff,#4f46e5 58%,#7c3aed)}
+#side nav a{position:relative;overflow:hidden}
+#side nav a:after{content:"";position:absolute;inset:0;transform:translateX(-120%);background:linear-gradient(105deg,transparent,rgba(255,255,255,.68),transparent);transition:transform .65s var(--lf-ease);pointer-events:none}
+#side nav a:hover:after{transform:translateX(120%)}
+#side nav a.bg-indigo-600{background:linear-gradient(100deg,rgba(238,242,255,.98),rgba(224,231,255,.72))!important;box-shadow:inset 3px 0 #5b55f4,0 5px 18px rgba(79,70,229,.07)}
+#app main{animation:lf-page-in .55s var(--lf-ease) both}
+@keyframes lf-page-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+#content h1{background:linear-gradient(100deg,#172033 0%,#334155 56%,#4f46e5 115%);-webkit-background-clip:text;background-clip:text;color:transparent!important}
+/* Panels get a restrained liquid-glass edge and gentle hover lift */
+#content section,#content .rounded-xl.border,#content .rounded-lg.border{
+  position:relative;overflow:hidden;
+  background:linear-gradient(145deg,rgba(255,255,255,.94),rgba(255,255,255,.78))!important;
+  border-color:rgba(203,213,225,.78)!important;
+  box-shadow:0 1px 2px rgba(15,23,42,.025),0 9px 28px rgba(51,65,85,.045),inset 0 1px rgba(255,255,255,.95)!important;
+  transition:transform .24s var(--lf-ease),box-shadow .24s var(--lf-ease),border-color .24s ease;
+}
+#content section:before{
+  content:"";position:absolute;inset:0 0 auto;height:1px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(129,140,248,.5),rgba(103,232,249,.48),transparent);opacity:.7;
+}
+#content section:hover{transform:translateY(-2px);border-color:rgba(165,180,252,.8)!important;box-shadow:0 5px 12px rgba(15,23,42,.035),0 16px 36px rgba(79,70,229,.075),inset 0 1px rgba(255,255,255,.98)!important}
+/* Keep dense tables stable and legible */
+#content table tr{transition:background-color .18s ease}
+#content table tr:hover td{background:rgba(238,242,255,.62)}
+#content table th{background:rgba(248,250,252,.92)}
+/* Controls feel responsive without changing click handlers */
+#content button,#f button,#side #logout{transition:transform .18s var(--lf-ease),box-shadow .18s ease,filter .18s ease,background-color .18s ease}
+#content button:not(:disabled):hover,#f button:not(:disabled):hover{transform:translateY(-1px);box-shadow:0 6px 15px rgba(79,70,229,.12)}
+#content button:not(:disabled):active,#f button:not(:disabled):active{transform:translateY(0) scale(.985)}
+#content button:disabled{opacity:.65;cursor:wait}
+#content input:not([type=checkbox]):not([type=radio]),#content select,#content textarea,#f input:not([type=checkbox]){transition:border-color .18s ease,box-shadow .18s ease,background-color .18s ease}
+#content input:focus,#content select:focus,#content textarea:focus,#f input:focus{border-color:#818cf8!important;box-shadow:0 0 0 4px rgba(99,102,241,.10)!important;outline:none}
+/* Login gets an iridescent wash, while preserving its form and IDs */
+body:has(#f):before{background:radial-gradient(ellipse at 18% 20%,rgba(129,140,248,.22),transparent 38%),radial-gradient(ellipse at 82% 25%,rgba(103,232,249,.20),transparent 34%),radial-gradient(ellipse at 70% 90%,rgba(244,114,182,.13),transparent 38%);filter:blur(30px)}
+#f{position:relative;overflow:hidden;background:rgba(255,255,255,.83)!important;backdrop-filter:blur(24px) saturate(150%);-webkit-backdrop-filter:blur(24px) saturate(150%);box-shadow:0 22px 70px rgba(51,65,85,.13),inset 0 1px rgba(255,255,255,.98)!important;animation:lf-card-in .65s var(--lf-ease) both}
+#f:after{content:"";position:absolute;top:0;left:-80%;width:60%;height:100%;pointer-events:none;background:linear-gradient(105deg,transparent,rgba(255,255,255,.52),transparent);transform:skewX(-15deg);animation:lf-glass-sheen 8s ease-in-out 1.2s infinite}
+@keyframes lf-card-in{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes lf-glass-sheen{0%,62%{left:-80%}82%,100%{left:145%}}
+#f h1:before{background:linear-gradient(145deg,#7770ff,#4f46e5 58%,#8b5cf6);box-shadow:0 8px 20px rgba(79,70,229,.23)}
+/* Stagger the dashboard's visible cards for a polished entrance */
+#content .grid>section:nth-child(1){animation:lf-card-in .45s .04s var(--lf-ease) both}
+#content .grid>section:nth-child(2){animation:lf-card-in .45s .10s var(--lf-ease) both}
+#content .grid>section:nth-child(3){animation:lf-card-in .45s .16s var(--lf-ease) both}
+#content .grid>section:nth-child(4){animation:lf-card-in .45s .22s var(--lf-ease) both}
+/* Accessibility: respect users who disable motion */
+@media(prefers-reduced-motion:reduce){
+  *,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
+@media(max-width:767px){
+  body:before{inset:-8%;filter:blur(30px)}
+  #content section:hover{transform:none}
+}

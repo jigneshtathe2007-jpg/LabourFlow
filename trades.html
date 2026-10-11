@@ -1,0 +1,57 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Trades & Rates</title>
+<script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="./styles.css"></head>
+<body class="bg-[#0f172a] text-slate-300"><div id="app"></div>
+<script type="module">
+import { requireAuth } from "./js/auth.js";
+import { list, insertRow, updateRow, deleteRow, toast, money, today } from "./js/utils.js";
+import { dataTable, form, showModal, esc } from "./js/ui.js";
+const SKILLS = ["SKILLED", "SEMISKILLED", "UNSKILLED"];
+const dayBefore = d => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); };
+
+requireAuth("trades", ({ content }) => {
+  const load = async () => {
+    const [trades, rates, labours] = await Promise.all(["trades", "tradeRateMaster", "labours"].map(list));
+    const current = id => rates.filter(r => r.tradeId === id).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0]; // latest rate row
+    content.innerHTML = `<div class="bg-[#1e293b] border border-slate-700 rounded-xl shadow p-4">
+      <div class="flex justify-between items-center mb-4"><h1 class="text-lg font-semibold text-white">Trades &amp; Default Rates</h1>
+      <button id="add" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg">+ Add Trade</button></div><div id="t"></div></div>`;
+
+    const base = [["tradeName", "Trade Name", "text", "maxlength=50"], ["colorCode", "Color / Category", "text", "maxlength=20"], ["skillLevel", "Skill Level", "select", SKILLS]];
+    const rateF = [["baseDailyRate", "Base Daily Rate (₹)", "number", 'min="1" step="0.01"'], ["effectiveFrom", "Effective From", "date"]];
+    const checkTrade = (d, ownId) => {
+      d.tradeName = d.tradeName.trim(); d.colorCode = d.colorCode.trim();
+      if (!d.tradeName) throw new Error("Trade name is required.");
+      if (trades.some(t => t.tradeId !== ownId && t.tradeName.toLowerCase() === d.tradeName.toLowerCase())) throw new Error("This trade already exists.");
+    };
+    const checkRate = d => { if (!(+d.baseDailyRate > 0)) throw new Error("Rate must be greater than 0."); if (!d.effectiveFrom) throw new Error("Effective date is required."); };
+
+    document.getElementById("add").onclick = () => form("Add Trade", [...base, ...rateF], { skillLevel: "SKILLED", effectiveFrom: today() }, async d => {
+      checkTrade(d); checkRate(d);
+      const tradeId = await insertRow("trades", "tradeId", { tradeName: d.tradeName, colorCode: d.colorCode, skillLevel: d.skillLevel });
+      await insertRow("tradeRateMaster", "tradeRateId", { tradeId, baseDailyRate: +d.baseDailyRate, effectiveFrom: d.effectiveFrom, effectiveTo: null });
+      toast("Trade added successfully."); load(); });
+
+    dataTable(document.getElementById("t"), { file: "trades.csv",
+      rows: trades.map(t => { const r = current(t.tradeId); return { ...t, rate: r ? r.baseDailyRate : 0, since: r ? r.effectiveFrom : "-" }; }),
+      cols: [["tradeId", "ID"], ["tradeName", "Trade"], ["colorCode", "Color"], ["skillLevel", "Skill"], ["rate", "Current Rate", v => money(v)], ["since", "Effective From"]],
+      actions: [
+        ["Edit", t => form("Edit Trade", base, t, async d => { checkTrade(d, t.tradeId);
+          await updateRow("trades", t.tradeId, d, { tradeName: t.tradeName, colorCode: t.colorCode, skillLevel: t.skillLevel }); toast("Trade updated."); load(); })],
+        ["New Rate", t => form(`New rate for ${t.tradeName}`, rateF, { baseDailyRate: t.rate, effectiveFrom: today() }, async d => {
+          checkRate(d); const cur = current(t.tradeId);
+          // history is preserved: the old row is closed, a new row is inserted (never overwritten)
+          if (cur && d.effectiveFrom <= cur.effectiveFrom) throw new Error("New date must be after " + cur.effectiveFrom + ".");
+          if (cur) await updateRow("tradeRateMaster", cur.tradeRateId, { effectiveTo: dayBefore(d.effectiveFrom) }, { effectiveTo: cur.effectiveTo });
+          await insertRow("tradeRateMaster", "tradeRateId", { tradeId: t.tradeId, baseDailyRate: +d.baseDailyRate, effectiveFrom: d.effectiveFrom, effectiveTo: null });
+          toast("Rate updated. Old rate kept in history."); load(); })],
+        ["History", t => showModal(`Rate history: ${t.tradeName}`, `<table class="w-full"><tr class="text-left text-slate-400"><th>Rate</th><th>From</th><th>To</th></tr>
+          ${rates.filter(r => r.tradeId === t.tradeId).sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom)).map(r => `<tr class="border-t border-slate-700"><td class="py-1">${money(r.baseDailyRate)}</td><td>${esc(r.effectiveFrom)}</td><td>${esc(r.effectiveTo || "Current")}</td></tr>`).join("")}</table>`)],
+        ["Delete", async t => {
+          if (labours.some(l => l.tradeId === t.tradeId)) return toast("Cannot delete: labour records use this trade.", false);
+          if (!confirm(`Delete trade "${t.tradeName}" and its rate history?`)) return;
+          for (const r of rates.filter(r => r.tradeId === t.tradeId)) await deleteRow("tradeRateMaster", r.tradeRateId, r);
+          await deleteRow("trades", t.tradeId, { tradeName: t.tradeName }); toast("Trade deleted."); load(); }]] });
+  };
+  load();
+});
+</script></body></html>

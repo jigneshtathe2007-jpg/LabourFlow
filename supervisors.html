@@ -1,0 +1,57 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Supervisors</title>
+<script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="./styles.css"></head>
+<body class="bg-[#0f172a] text-slate-300"><div id="app"></div>
+<script type="module">
+import { requireAuth } from "./js/auth.js";
+import { list, insertRow, updateRow, deleteRow, createUser, toast, money } from "./js/utils.js";
+import { dataTable, form, esc } from "./js/ui.js";
+
+// Create accounts through the MySQL-backed API. Passwords are hashed on the server.
+async function createLogin(d, role) { return createUser({ fullName: d.fullName, email: d.email, password: d.password, role }); }
+const accountFields = [["fullName", "Full Name", "text", "maxlength=100"], ["email", "Email (login)", "email"], ["password", "Password (min 6 chars)", "password", "minlength=6"]];
+const checkAccount = d => { d.fullName = d.fullName.trim(); d.email = d.email.trim().toLowerCase(); if (!d.fullName) throw new Error("Name is required."); if (d.password.length < 8) throw new Error("Password must be at least 8 characters."); };
+
+requireAuth("supervisors", ({ content }) => {
+  const load = async () => {
+    const [sups, users, sites, cards, logs, adv] = await Promise.all(["supervisors", "users", "sites", "attendanceCards", "dailyHajiriLogs", "advanceLedger"].map(list));
+    content.innerHTML = `<div class="bg-[#1e293b] border border-slate-700 rounded-xl shadow p-4">
+      <div class="flex justify-between items-center mb-4 flex-wrap gap-2"><h1 class="text-lg font-semibold text-white">Supervisors</h1>
+      <div class="flex gap-2"><button id="addu" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg">+ Finance / Admin User</button>
+      <button id="add" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg">+ Add Supervisor</button></div></div><div id="t"></div></div>`;
+    const siteOpts = sites.map(s => [s.siteId, s.siteName]);
+    const supFields = [["contactNo", "Contact No (optional)", "tel", "maxlength=15"], ["siteId", "Assigned Site", "select", siteOpts], ["fixedMonthlySalary", "Fixed Monthly Salary (₹)", "number", 'min="0" step="0.01"']];
+    const checkSup = d => { d.contactNo = d.contactNo.trim(); if (d.contactNo && !/^\d{7,15}$/.test(d.contactNo)) throw new Error("Contact number must be 7 to 15 digits.");
+      if (!(+d.fixedMonthlySalary >= 0) || d.fixedMonthlySalary === "") throw new Error("Enter a valid salary (0 or more)."); if (!d.siteId) throw new Error("Select a site."); };
+
+    document.getElementById("add").onclick = () => {
+      if (!sites.length) return toast("Add a site first.", false);
+      form("Add Supervisor", [...accountFields, ...supFields], {}, async d => {
+        checkAccount(d); checkSup(d);
+        const newUser = await createLogin(d, "SUPERVISOR");
+        await insertRow("supervisors", "supervisorId", { userId: newUser.userId, siteId: +d.siteId, contactNo: d.contactNo, fixedMonthlySalary: +d.fixedMonthlySalary });
+        toast("Supervisor created. They can now log in."); load(); });
+    };
+    document.getElementById("addu").onclick = () => form("Add Finance / Admin User", [...accountFields, ["role", "Role", "select", ["FINANCE", "ADMIN"]]], { role: "FINANCE" }, async d => {
+      checkAccount(d); await createLogin(d, d.role); toast(d.role + " user created."); load(); });
+
+    const rows = sups.map(s => { const u = users.find(x => x._id === s.userId) || {};
+      return { ...s, name: u.fullName || "-", email: u.email || "-", siteName: sites.find(x => x.siteId === s.siteId)?.siteName || "-", status: u.isActive === false ? "Inactive" : "Active", fullName: u.fullName, isActive: u.isActive !== false }; });
+    dataTable(document.getElementById("t"), { file: "supervisors.csv", rows,
+      cols: [["supervisorId", "ID"], ["name", "Name"], ["email", "Email"], ["siteName", "Site"], ["contactNo", "Contact"], ["fixedMonthlySalary", "Fixed Salary", v => money(v)],
+        ["status", "Status", v => `<span class="px-2 py-0.5 rounded text-xs text-white ${v === "Active" ? "bg-green-600" : "bg-slate-600"}">${v}</span>`]],
+      actions: [
+        ["Edit", s => form("Edit Supervisor", [["fullName", "Full Name"], ...supFields, ["isActive", "Status", "select", [["true", "Active"], ["false", "Inactive"]]]], { ...s, isActive: String(s.isActive) }, async d => {
+          d.fullName = d.fullName.trim(); if (!d.fullName) throw new Error("Name is required."); checkSup(d);
+          await updateRow("users", s.userId, { fullName: d.fullName, isActive: d.isActive === "true" }, { fullName: s.fullName, isActive: s.isActive });
+          await updateRow("supervisors", s.supervisorId, { siteId: +d.siteId, contactNo: d.contactNo, fixedMonthlySalary: +d.fixedMonthlySalary }, { siteId: s.siteId, contactNo: s.contactNo, fixedMonthlySalary: s.fixedMonthlySalary });
+          toast("Supervisor updated successfully."); load(); })],
+        ["Reset Password", async s => { if (!confirm("Send a password reset email to " + s.email + "?")) return; toast("Password reset email is not configured in the MySQL version yet. Ask an administrator to reset this account password.", false); }],
+        ["Delete", async s => {
+          if ([cards, logs, adv].some(a => a.some(x => x.supervisorId === s.supervisorId))) return toast("Cannot delete: this supervisor has attendance or advance records. Mark Inactive instead.", false);
+          if (!confirm(`Delete supervisor ${s.name}?`)) return;
+          await deleteRow("supervisors", s.supervisorId, { userId: s.userId, siteId: s.siteId }); await deleteRow("users", s.userId, { fullName: s.name, email: s.email });
+          toast("Supervisor deleted."); load(); }]] });
+  };
+  load();
+});
+</script></body></html>
