@@ -4,6 +4,14 @@ USE labourflow_db;
 -- The lf_* tables are the MySQL-compatible storage used by the current UI.
 -- Existing original tables are preserved.
 
+CREATE TABLE IF NOT EXISTS users (
+ user_id INT AUTO_INCREMENT PRIMARY KEY,
+ full_name VARCHAR(100) NOT NULL,
+ email VARCHAR(255) NOT NULL UNIQUE,
+ password_hash VARCHAR(255) NOT NULL,
+ role VARCHAR(30) NOT NULL DEFAULT 'SUPERVISOR'
+);
+
 CREATE TABLE IF NOT EXISTS lf_sites (
  site_id INT AUTO_INCREMENT PRIMARY KEY,
  site_name VARCHAR(150) NOT NULL,

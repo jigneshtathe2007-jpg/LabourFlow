@@ -1,5 +1,6 @@
 
-const API_URL = "http://localhost:3000";
+import { API_ORIGIN } from "./config.js";
+
 
 const ALL = ["ADMIN", "SUPERVISOR", "FINANCE"];
 
@@ -22,7 +23,7 @@ export const BUILT = [
 ];
 
 async function api(path, options = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(`${API_ORIGIN}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options
   });

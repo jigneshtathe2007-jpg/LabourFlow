@@ -3,12 +3,20 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const path = require('path');
 require('dotenv').config();
 const db = require('./db');
+
+if (!process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET must be configured.');
+}
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
+app.use(express.static(
+  process.env.WEB_ROOT || path.resolve(__dirname, '..')
+));
 
 const RESOURCES = {
   sites: ['lf_sites', 'site_id'],
@@ -147,6 +155,19 @@ function auth(req, res, next) {
 
 app.get('/', (_req, res) => {
   res.send('LabourFlow API is running.');
+});
+
+app.get('/api/health', async (_req, res) => {
+  try {
+    await db.query('SELECT 1');
+    res.json({ status: 'ok' });
+  } catch (error) {
+    console.error('Health check:', error.message);
+    res.status(503).json({
+      status: 'unavailable',
+      message: 'Database connection failed.'
+    });
+  }
 });
 
 app.get('/api/test-db', async (_req, res) => {

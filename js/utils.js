@@ -1,4 +1,5 @@
-const API_URL = 'http://localhost:3000/api';
+import { API_BASE } from './config.js';
+
 export const money = n => '₹' + (+n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 export const today = () => new Date().toISOString().slice(0, 10);
 
@@ -11,7 +12,7 @@ export function toast(msg, ok = true) {
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   const t = token(); if (t) headers.Authorization = `Bearer ${t}`;
-  const response = await fetch(`${API_URL}${path}`, { ...options, headers });
+  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.message || `API request failed (${response.status})`);
   return data;
