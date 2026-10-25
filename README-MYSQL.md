@@ -33,11 +33,12 @@ free-tier limits and terms before relying on it for payroll data.
    (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`) and
    `DB_SSL=true`, then run `node backend/create-admin.js`. Do not put these
    credentials in source control or share them in chat.
-4. Push this repository to GitHub and create a Render Blueprint from it. Render
-   will read `render.yaml`; set the requested `DB_HOST`, `DB_USER`,
-   `DB_PASSWORD`, and a unique, randomly generated `JWT_SECRET` in the service
-   environment. Use the TiDB cluster's actual connection port and database
-   name if they differ from the defaults. Keep `DB_SSL=true`.
+4. Create a Render Blueprint from this GitHub repository and select the
+   `deploy/render-labourflow` branch. Render will read `render.yaml`; set the
+   requested `DB_HOST`, `DB_USER`, `DB_PASSWORD`, and a unique, randomly
+   generated `JWT_SECRET` in the service environment. Use the TiDB cluster's
+   actual connection port and database name if they differ from the defaults.
+   Keep `DB_SSL=true`.
 5. Restrict the TiDB network access rules to the narrowest range supported by
    your hosting plan. If the free web service has changing outbound IPs, a
    broader allowlist may be required; use a strong database password and TLS.
